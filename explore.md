@@ -32,8 +32,9 @@ csvtool col 3 clean_dialog.csv | tail -n +2 | sort -u | wc -l   # 842
 csvtool col 3 clean_dialog.csv | tail -n +2 | sort | uniq -c | sort -rn | head -20
 ```
 
-The header is `"title","writer","pony","dialog"`, and every field is wrapped in
-double quotes. Each row is one line of dialogue.
+The header is `"title","writer","pony","dialog"`. Each row is one line of
+dialogue. Every field is wrapped in double quotes except for 21 missing values
+(see unexpected aspect 4 below).
 
 | Field | Meaning | Values |
 |-------|---------|--------|
@@ -61,6 +62,11 @@ Ever` (458 lines). That leaves **195 TV episodes**. Counting unique titles in fi
 order with `uniq` also gives 197, which means each episode's lines are stored
 together in one contiguous block. Two-part episodes are counted as two episodes
 because each part has its own title.
+
+The episodes run in airing order from `Friendship is Magic, part 1` (the series
+premiere) to `School Raze - Part 2` (the Season 8 finale). 195 is exactly the
+number of episodes in Seasons 1-8 (26 + 26 + 13 + 26 x 5), so the dataset
+covers the first eight seasons and does not include Season 9.
 
 ### Unexpected aspects of the dataset
 
@@ -98,25 +104,42 @@ grep -c '","Rarity","' clean_dialog.csv      # 2660 (Rarity is the speaker)
 **3. The file uses Windows line endings (`\r\n`).**
 
 ```bash
-head -2 clean_dialog.csv | cat -A    # every line ends in ^M$
-file clean_dialog.csv
+head -2 clean_dialog.csv | cat -A              # every line ends in ^M$
+grep -c $'\r$' clean_dialog.csv                # 36860 (all lines)
+grep -c ',NA$' clean_dialog.csv                # 0
+tr -d '\r' < clean_dialog.csv | grep -c ',NA$' # 21
 ```
 
-A pattern anchored to the end of the line, such as `grep 'Rarity"$'`, silently
-matches nothing because of the hidden `\r`.
+A pattern anchored to the end of the line silently matches nothing because of
+the hidden `\r`: `grep -c ',NA$'` finds 0 rows, even though 21 rows end in `,NA`.
 
 **4. Missing dialogue is stored as an unquoted `NA`.**
 
 ```bash
 csvtool col 4 clean_dialog.csv | grep -cx 'NA'    # 21
 grep -n ',NA' clean_dialog.csv | head -3
+tr -d '\r' < clean_dialog.csv | grep ',NA$' | cut -d, -f3 | sort | uniq -c   # all "Others"
 ```
 
 21 rows have `NA` as their dialogue, e.g. line 12081:
-`"Magical Mystery Cure","M. A. Larson","Others",NA`. These are the only
-unquoted fields in the file, and they would be counted as real lines of speech.
+`"Magical Mystery Cure","M. A. Larson","Others",NA`. All 21 are spoken by
+`Others`, spread over 9 episodes. These are the only unquoted fields in the file,
+and they would be counted as real lines of speech.
 
-**5. Titles and writers are formatted inconsistently.**
+**5. Fields contain commas and escaped quotes.** Some titles, writers and most
+dialogue contain commas, e.g. `"Friendship is Magic, part 1"` and
+`"Testing Testing 1, 2, 3"`, and some contain doubled quotes, e.g.
+`"Applejack's ""Day"" Off"`. Splitting on commas with `cut` therefore returns the
+wrong column:
+
+```bash
+sed -n 2p clean_dialog.csv | cut -d, -f3    # "Lauren Faust" (the writer, not the speaker)
+csvtool col 3 clean_dialog.csv | sed -n 2p  # Narrator
+```
+
+A CSV-aware tool like `csvtool` is needed to pull out columns reliably.
+
+**6. Titles and writers are formatted inconsistently.**
 
 ```bash
 csvtool col 1 clean_dialog.csv | tail -n +2 | sort -u | grep -i 'part'
@@ -160,7 +183,9 @@ same character.
 ### Percent of all lines
 
 The denominator is every line of dialogue in the dataset, from all characters,
-with the header excluded: **36,859**.
+with the header excluded: **36,859**. Following the assignment's instruction to
+treat the dataset as perfect, this includes the 21 `NA` rows. Leaving them out
+would change each percentage by less than 0.01 points.
 
 ```bash
 total=$(tail -n +2 clean_dialog.csv | wc -l)
